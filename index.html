@@ -17,7 +17,14 @@ button,select,input,textarea{font:inherit;color:inherit}
 /* ---------- barres ---------- */
 .bar{display:flex;align-items:center;gap:4px;padding:5px 8px;background:var(--bar);
   border-bottom:1px solid var(--line);flex-wrap:wrap;flex:0 0 auto}
-.bar.b2{background:var(--bar2);padding:4px 8px}
+/* La barre d'outils garde une hauteur fixe : quand ses options contextuelles
+   (texte, formes, sélection) la font passer sur deux lignes, la seconde ligne
+   flotte par-dessus le haut de la scène au lieu de la repousser. Le canvas ne
+   change donc jamais de taille au gré de l'outil choisi. */
+.bar.b2{background:var(--bar2);padding:0;border-bottom:0;height:39px;flex-wrap:nowrap;
+  align-items:flex-start;overflow:visible;position:relative;z-index:3}
+.b2in{display:flex;align-items:center;gap:4px;padding:4px 8px;flex-wrap:wrap;width:100%;
+  background:var(--bar2);border-bottom:1px solid var(--line);box-shadow:0 8px 18px -10px #000d}
 .brand{font-weight:650;letter-spacing:.2px;padding:0 10px 0 2px;color:#fff;white-space:nowrap}
 .brand b{color:var(--acc)}
 .sep{width:1px;height:22px;background:var(--line);margin:0 5px;flex:0 0 auto}
@@ -183,7 +190,7 @@ body.present #showbar{display:flex}
   </div>
 
   <!-- ============ barre outils ============ -->
-  <div class="bar b2">
+  <div class="bar b2"><div class="b2in">
     <div id="tools" class="swatches">
       <button class="btn tool on" data-tool="select" title="Sélection — déplacer / redimensionner / pivoter (V)"><span class="ic">↖</span></button>
       <button class="btn tool" data-tool="hand" title="Main — déplacer la vue (H, ou Espace maintenu)"><span class="ic">✋</span></button>
@@ -244,7 +251,7 @@ body.present #showbar{display:flex}
       <button class="btn" id="bDup" title="Dupliquer (Ctrl+D)"><span class="ic">⧉</span></button>
       <button class="btn warn" id="bDel" title="Supprimer (Suppr)"><span class="ic">🗑</span></button>
     </div>
-  </div>
+  </div></div>
 
   <!-- ============ scène ============ -->
   <div id="stage">
@@ -291,10 +298,11 @@ body.present #showbar{display:flex}
       <label class="fld"><input type="checkbox" id="fxDisp" checked> Grande taille</label>
     </h2>
     <div class="body">
-      <textarea id="fxsrc" spellcheck="false" placeholder="Exemple :  f(x) = \frac{x^2 - 1}{x + 1} \quad \text{pour } x \ne -1"></textarea>
+      <textarea id="fxsrc" spellcheck="false" placeholder="Exemple :  f(x) = (x^2 - 1)/(x + 1) \quad \text{pour } x \ne -1"></textarea>
       <div id="fxout"></div>
       <div class="tabs" id="fxTabs"></div>
       <div class="palrow" id="fxPal"></div>
+      <p class="note">Tape simplement <code>a/b</code> pour obtenir une fraction : <code>(x+1)/(x-1)</code>, <code>2x/3</code>, <code>1/2 x</code>… L'espace délimite la fraction. <code>\slash</code> donne une barre oblique ordinaire.</p>
       <p class="note">Astuce : dans l'outil <b>Texte</b> tu peux mélanger phrase et formule en encadrant la formule par des <code>$</code> — par exemple <code>Soit $f(x)=\frac{1}{x}$ sur $\mathbb{R}^*$</code>.</p>
     </div>
     <div class="foot">
@@ -381,6 +389,9 @@ body.present #showbar{display:flex}
       <h3>Mémo LaTeX (utilisable dans Texte entre <code>$…$</code>)</h3>
       <div class="grid2">
         <div class="kv"><code>\frac{a}{b}</code><span>fraction</span></div>
+        <div class="kv"><code>a/b</code> <code>(x+1)/(x-1)</code><span>fraction automatique</span></div>
+        <div class="kv"><code>1/2 x</code> ≠ <code>1/2x</code><span>l'espace borne la fraction</span></div>
+        <div class="kv"><code>\slash</code><span>barre oblique simple, sans fraction</span></div>
         <div class="kv"><code>x^2</code> <code>x_i</code><span>exposant / indice</span></div>
         <div class="kv"><code>\sqrt{x}</code> <code>\sqrt[3]{x}</code><span>racine</span></div>
         <div class="kv"><code>\sum_{i=1}^{n}</code><span>somme</span></div>
@@ -510,27 +521,105 @@ const TeX = (function () {
   function parseList(ts,p,mode){
     const out=[];
     while(p.i<ts.length && !stops(ts,p,mode)){
-      if(ts[p.i].k==='sp'){p.i++;continue;}
+      if(ts[p.i].k==='sp'){p.i++;out.push(WS);continue;}   // gardé pour borner a/b
       const a=parseScripted(ts,p);
       if(a) out.push(a);
     }
-    return out;
+    return foldSlash(out);
   }
   function parseScripted(ts,p){
     let base=parseAtom(ts,p);
     if(!base) return null;
     let sup=null,sub=null;
     for(;;){
-      while(ts[p.i]&&ts[p.i].k==='sp')p.i++;
-      const t=ts[p.i];
+      /* les espaces ne sont consommés que s'ils précèdent ^ _ ou ' ; sinon ils
+         restent visibles pour parseList, qui s'en sert pour borner a/b */
+      let j=p.i; while(ts[j]&&ts[j].k==='sp')j++;
+      const t=ts[j];
       if(!t) break;
-      if(t.k==='^'){p.i++;const a=parseAtom(ts,p);sup=sup?{t:'grp',body:[sup,a]}:a;}
-      else if(t.k==='_'){p.i++;const a=parseAtom(ts,p);sub=sub?{t:'grp',body:[sub,a]}:a;}
-      else if(t.k==='cmd'&&t.v==="'"){p.i++;const pr={t:'sym',c:'′',cls:'ord'};sup=sup?{t:'grp',body:[sup,pr]}:pr;}
+      if(t.k==='^'){p.i=j+1;const a=parseAtom(ts,p);sup=sup?{t:'grp',body:[sup,a]}:a;}
+      else if(t.k==='_'){p.i=j+1;const a=parseAtom(ts,p);sub=sub?{t:'grp',body:[sub,a]}:a;}
+      else if(t.k==='cmd'&&t.v==="'"){p.i=j+1;const pr={t:'sym',c:'′',cls:'ord'};sup=sup?{t:'grp',body:[sup,pr]}:pr;}
       else break;
     }
     if(sup||sub) return {t:'scr',base,sup,sub};
     return base;
+  }
+
+  /* ---- fractions automatiques ----
+     « a/b » se lit comme \frac{a}{b}. Chaque opérande est la suite d'atomes
+     collée à la barre, bornée par un espace, un opérateur (+ − = < > × ⋅ …),
+     une relation, une virgule (sauf décimale : 3,5/2), un grand opérateur
+     (∑ ∫ lim…) ou un saut de ligne. Une parenthèse équilibrée compte pour un
+     seul bloc et ses parenthèses rondes externes disparaissent : (x+1)/(x-1)
+     donne la fraction attendue. « 1/2 x » reste ½·x alors que « 1/2x » met 2x
+     au dénominateur. \slash (ou \/) force une barre oblique ordinaire. */
+  const WS={t:'ws'};
+  const SLASH_STOP={'+':1,'-':1,'=':1,'<':1,'>':1,'*':1,',':1,';':1,':':1,'/':1,
+    '−':1,'×':1,'·':1,'⋅':1,'±':1,'≤':1,'≥':1,'⩽':1,'⩾':1,'≠':1,'≈':1,'→':1,'⇒':1,'⇔':1,'∈':1};
+  function isDigitNode(n){ return !!n && n.t==='chr' && /[0-9]/.test(n.c); }
+  function isSlash(n){ return !!n && n.t==='chr' && n.c==='/' && !n.lit; }
+  function isSign(n){ return !!n && n.t==='chr' && !n.lit && (n.c==='-'||n.c==='+'||n.c==='−'); }
+  function parenOf(n){ return (n&&n.t==='chr'&&!n.lit&&'()[]'.indexOf(n.c)>=0)?n.c:''; }
+  function slashStop(n,prev,next){          // vrai si n borne un opérande
+    if(!n) return true;
+    const b=n.t==='scr'?n.base:n;
+    switch(b.t){
+      case 'ws': case 'big': case 'sp': case 'brk': case 'style': case 'mod': case 'unk': return true;
+      case 'op': return !!b.limits;
+      case 'sym': return b.cls==='bin'||b.cls==='rel'||b.cls==='punct';
+      case 'chr':
+        if(b.lit) return false;
+        if(b.c===','&&isDigitNode(prev)&&isDigitNode(next)) return false;
+        return !!SLASH_STOP[b.c];
+      default: return false;
+    }
+  }
+  function stripParens(a){                  // ( … ) englobant tout l'opérande → contenu nu
+    if(a.length<2||parenOf(a[0])!=='('||parenOf(a[a.length-1])!==')') return a;
+    let d=0;
+    for(let i=0;i<a.length;i++){
+      const c=parenOf(a[i]);
+      if(c==='('||c==='[') d++;
+      else if(c===')'||c===']'){ d--; if(d===0&&i<a.length-1) return a; }
+    }
+    return a.slice(1,-1);
+  }
+  function notWs(n){ return n.t!=='ws'; }
+  function foldSlash(out){
+    for(let i=0;i<out.length;i++){
+      if(!isSlash(out[i])) continue;
+      /* numérateur : on remonte jusqu'à une borne, parenthèses équilibrées */
+      let s=i; while(s>0&&out[s-1].t==='ws') s--;
+      const numEnd=s; let d=0;
+      while(s>0){
+        const n=out[s-1], c=parenOf(n);
+        if(c===')'||c===']'){ d++; s--; continue; }
+        if(c==='('||c==='['){ if(!d) break; d--; s--; continue; }
+        if(!d&&slashStop(n,out[s-2],out[s])) break;
+        s--;
+      }
+      if(d) continue;
+      /* dénominateur : symétrique, un signe unaire en tête est accepté */
+      let e=i+1; while(e<out.length&&out[e].t==='ws') e++;
+      const denStart=e; d=0;
+      if(isSign(out[e])) e++;
+      while(e<out.length){
+        const n=out[e], c=parenOf(n);
+        if(c==='('||c==='['){ d++; e++; continue; }
+        if(c===')'||c===']'){ if(!d) break; d--; e++; continue; }
+        if(!d&&slashStop(n,out[e-1],out[e+1])) break;
+        e++;
+      }
+      if(d) continue;
+      const num=stripParens(out.slice(s,numEnd)).filter(notWs);
+      const den=stripParens(out.slice(denStart,e)).filter(notWs);
+      if(!num.length||!den.length||(den.length===1&&isSign(den[0]))) continue;
+      const f={t:'frac',num:{t:'grp',body:num},den:{t:'grp',body:den},disp:0};
+      out.splice(s,e-s,f);
+      i=s;                                  // a/b/c : la fraction devient l'opérande suivant
+    }
+    return out.filter(notWs);
   }
   function readArg(ts,p){
     while(ts[p.i]&&ts[p.i].k==='sp')p.i++;
@@ -626,6 +715,7 @@ const TeX = (function () {
     if(BIGOP[n]) return {t:'big',c:BIGOP[n][0],limits:!!BIGOP[n][1]};
     if(FUNCS.indexOf(n)>=0) return {t:'op',name:n,limits:false};
     if(LIMFUNCS.indexOf(n)>=0) return {t:'op',name:n,limits:true};
+    if(n==='slash'||n==='/') return {t:'chr',c:'/',lit:true};   // barre oblique sans fraction
     if(n==='%'||n==='{'||n==='}'||n==='$'||n==='&'||n==='#'||n==='_') return {t:'chr',c:n,lit:true};
     if(n==='\\') return {t:'brk'};
     if(n==='') return null;
@@ -2432,7 +2522,7 @@ tedit.addEventListener('input', sizeEditor);
 tedit.addEventListener('blur', function(){ setTimeout(commitText,80); });
 tedit.addEventListener('keydown', function(e){
   e.stopPropagation();
-  if(e.key==='Escape'){ e.preventDefault(); cancelText(); }
+  if(e.key==='Escape'){ e.preventDefault(); escUsed(); cancelText(); }
   else if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); commitText(); }
 });
 
@@ -2560,7 +2650,7 @@ $('fxsrc').addEventListener('input',fxPreview);
 $('fxsrc').addEventListener('keydown',function(e){
   e.stopPropagation();
   if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); fxCommit(); }
-  if(e.key==='Escape'){ e.preventDefault(); closeFormula(); }
+  if(e.key==='Escape'){ e.preventDefault(); escUsed(); closeFormula(); }
 });
 $('fxSize').addEventListener('input',fxPreview);
 $('fxCol').addEventListener('input',fxPreview);
@@ -3015,19 +3105,58 @@ function setPresent(on){
   setTimeout(function(){ resizeCanvas(); fitView(); },60);
   if(on) hint('Mode présentation — Échap pour revenir',3000);
 }
-$('bFull').onclick=function(){
-  const d=document, el=d.documentElement;
-  const on = d.fullscreenElement || d.webkitFullscreenElement;
+/* ---------- plein écran et touche Échap ----------
+   En plein écran, le navigateur s'approprie Échap pour en sortir. Chrome et Edge
+   offrent l'API Keyboard Lock : une fois Échap verrouillée, la page la reçoit
+   comme une touche ordinaire et il faut la maintenir enfoncée pour quitter le
+   plein écran. Safari respecte le preventDefault posé dans le gestionnaire
+   clavier. En dernier recours, si une sortie de plein écran suit de près un
+   Échap qui servait à fermer un menu, un simple clic rétablit le plein écran. */
+let escAt=0, fsLostAt=0, fsHinted=false;
+function fsOn(){ return !!(document.fullscreenElement||document.webkitFullscreenElement); }
+function escUsed(){ escAt=Date.now(); }
+function fsEnter(){
+  const el=document.documentElement;
+  const r=el.requestFullscreen||el.webkitRequestFullscreen;   // Safari ancien
+  if(!r){ hint('Plein écran indisponible dans ce navigateur'); return; }
+  try{ const q=r.call(el); if(q&&q.catch) q.catch(function(){}); }catch(err){}
+}
+function fsExit(){
+  const d=document;
+  try{ (d.exitFullscreen||d.webkitExitFullscreen).call(d); }catch(err){}
+}
+function lockEsc(on){
+  const kb=navigator.keyboard;
+  if(!kb||typeof kb.lock!=='function') return false;
   try{
-    if(on){ (d.exitFullscreen||d.webkitExitFullscreen).call(d); }
-    else{
-      const r=el.requestFullscreen||el.webkitRequestFullscreen;   // Safari ancien
-      if(r){ const q=r.call(el); if(q&&q.catch) q.catch(function(){}); }
-      else hint('Plein ecran indisponible dans ce navigateur');
+    if(on){ const q=kb.lock(['Escape']); if(q&&q.catch) q.catch(function(){}); }
+    else kb.unlock();
+  }catch(err){ return false; }
+  return true;
+}
+function onFsChange(){
+  const on=fsOn();
+  const locked=lockEsc(on);
+  if(on){
+    fsLostAt=0;
+    if(!locked&&!fsHinted){
+      fsHinted=true;
+      hint('Ici, Échap peut aussi quitter le plein écran'+(IS_MAC?' — préfère celui de macOS (Ctrl+Cmd+F)':''),6000);
     }
-  }catch(err){}
-};
-document.addEventListener('webkitfullscreenchange', function(){ setTimeout(resizeCanvas,80); });
+  } else if(Date.now()-escAt<600){
+    fsLostAt=Date.now();
+    hint('Plein écran quitté par Échap — clique n\'importe où pour le rétablir',6000);
+  }
+  setTimeout(resizeCanvas,80);
+}
+$('bFull').onclick=function(){ if(fsOn()) fsExit(); else fsEnter(); };
+document.addEventListener('fullscreenchange',onFsChange);
+document.addEventListener('webkitfullscreenchange',onFsChange);
+window.addEventListener('pointerdown',function(){
+  const again = fsLostAt && Date.now()-fsLostAt<8000;
+  fsLostAt=0;
+  if(again) fsEnter();
+},true);
 $('bHelp').onclick=function(){ $('help').classList.add('show'); };
 $('helpClose').onclick=function(){ $('help').classList.remove('show'); };
 $('help').addEventListener('mousedown',function(e){ if(e.target===$('help')) $('help').classList.remove('show'); });
@@ -3041,12 +3170,17 @@ window.addEventListener('keydown', function(e){
   const mod = e.ctrlKey||e.metaKey;
 
   if(e.key==='Escape'){
-    if($('fx').classList.contains('show')){ closeFormula(); return; }
-    if($('help').classList.contains('show')){ $('help').classList.remove('show'); return; }
-    if($('exp').classList.contains('show')){ $('exp').classList.remove('show'); return; }
-    if(editing){ cancelText(); return; }
-    if(document.body.classList.contains('present')){ setPresent(false); return; }
-    if(S.sel.length){ S.sel=[]; invalidate(); syncUI(); return; }
+    let used=true;
+    if($('fx').classList.contains('show')) closeFormula();
+    else if($('help').classList.contains('show')) $('help').classList.remove('show');
+    else if($('exp').classList.contains('show')) $('exp').classList.remove('show');
+    else if(editing) cancelText();
+    else if(document.body.classList.contains('present')) setPresent(false);
+    else if(S.sel.length){ S.sel=[]; invalidate(); syncUI(); }
+    else used=false;
+    /* Échap servait à fermer quelque chose : on la garde pour nous, le plein
+       écran ne doit pas en pâtir (voir « plein écran et touche Échap ») */
+    if(used){ escUsed(); if(fsOn()) e.preventDefault(); }
     return;
   }
   if(e.key==='F1'){ e.preventDefault(); $('help').classList.toggle('show'); return; }
@@ -3333,6 +3467,5 @@ window.addEventListener('beforeunload', function(e){
   e.returnValue='';
   return '';
 });
-document.addEventListener('fullscreenchange', function(){ setTimeout(function(){ resizeCanvas(); },80); });
 init();
 </script>
