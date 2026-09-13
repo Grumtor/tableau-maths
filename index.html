@@ -2413,12 +2413,26 @@ cv.addEventListener('dblclick', function(e){
   else if(it.t==='latex'){ openFormula(it); }
 });
 
-/* ---------- molette ---------- */
+/* ---------- molette ----------
+   Zoom : la molette d'une souris envoie ±100 par cran, alors qu'un pincement ou
+   un défilement au trackpad envoie une rafale d'événements à petits deltas. Un
+   facteur fixe par événement rend donc le trackpad brutal : le facteur est
+   modulé par le delta, avec une sensibilité propre à chaque geste. */
+const ZOOM_NOTCH=1.12;     // souris : facteur par cran
+const ZOOM_PINCH=0.005;    // trackpad, pincement (Ctrl+molette synthétisé) : ln(facteur) par unité de delta
+const ZOOM_SCROLL=0.002;   // trackpad, Cmd/Ctrl + défilement à deux doigts
+function wheelZoomFactor(e){
+  let d=e.deltaY;
+  if(e.deltaMode===1) d*=40; else if(e.deltaMode===2) d*=800;   // lignes / pages → pixels
+  if(Math.abs(d)>=80) return d<0?ZOOM_NOTCH:1/ZOOM_NOTCH;         // cran de souris
+  const k=e.metaKey&&!e.ctrlKey ? ZOOM_SCROLL : ZOOM_PINCH;
+  return Math.exp(-clamp(d,-40,40)*k);
+}
 let lastWheelPage=0;
 stage.addEventListener('wheel', function(e){
   e.preventDefault();
   const sp=evScr(e);
-  if(e.ctrlKey||e.metaKey){ zoomAt(sp.x,sp.y, e.deltaY<0?1.12:1/1.12); return; }
+  if(e.ctrlKey||e.metaKey){ zoomAt(sp.x,sp.y, wheelZoomFactor(e)); return; }
   const v=view(), F=fmt();
   if(isPages() && F.w*v.s<=VW+2 && F.h*v.s<=VH+2){
     const now=performance.now();
